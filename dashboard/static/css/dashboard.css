@@ -1,0 +1,225 @@
+/* ProjectCompass Dashboard Styles */
+
+body {
+  font-size: .875rem;
+  background-color: #f8f9fa;
+}
+
+.feather {
+  width: 16px;
+  height: 16px;
+  vertical-align: text-bottom;
+}
+
+/*
+ * Sidebar
+ */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 100; /* Behind the navbar */
+  padding: 48px 0 0; /* Height of navbar */
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, .1);
+}
+
+@media (max-width: 767.98px) {
+  .sidebar {
+    top: 5rem;
+  }
+}
+
+.sidebar-sticky {
+  position: relative;
+  top: 0;
+  height: calc(100vh - 48px);
+  padding-top: .5rem;
+  overflow-x: hidden;
+  overflow-y: auto; /* Scrollable contents if viewport is shorter than content. */
+}
+
+.sidebar .nav-link {
+  font-weight: 500;
+  color: #ced4da;
+  padding: 0.75rem 1rem;
+}
+
+.sidebar .nav-link:hover {
+  color: #fff;
+}
+
+.sidebar .nav-link.active {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar .nav-link .feather {
+  margin-right: 4px;
+}
+
+.sidebar-heading {
+  font-size: .75rem;
+  text-transform: uppercase;
+}
+
+/*
+ * Navbar
+ */
+
+.navbar-brand {
+  padding-top: .75rem;
+  padding-bottom: .75rem;
+  font-size: 1rem;
+  background-color: rgba(0, 0, 0, .25);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, .25);
+}
+
+.navbar .navbar-toggler {
+  top: .25rem;
+  right: 1rem;
+}
+
+/*
+ * Cards
+ */
+
+.card {
+  margin-bottom: 1.5rem;
+  box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15);
+  border: none;
+  border-radius: 0.35rem;
+}
+
+.card-header {
+  background-color: #f8f9fc;
+  border-bottom: 1px solid #e3e6f0;
+}
+
+.card-header h6 {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+.border-left-primary {
+  border-left: 0.25rem solid #4e73df !important;
+}
+
+.border-left-success {
+  border-left: 0.25rem solid #1cc88a !important;
+}
+
+.border-left-info {
+  border-left: 0.25rem solid #36b9cc !important;
+}
+
+.border-left-warning {
+  border-left: 0.25rem solid #f6c23e !important;
+}
+
+.border-left-danger {
+  border-left: 0.25rem solid #e74a3b !important;
+}
+
+.text-xs {
+  font-size: .7rem;
+}
+
+.text-gray-800 {
+  color: #5a5c69!important;
+}
+
+.chart-area {
+  position: relative;
+  height: 300px;
+  width: 100%;
+}
+
+.chart-pie {
+  position: relative;
+  height: 300px;
+  width: 100%;
+}
+
+.chart-bar {
+  position: relative;
+  height: 300px;
+  width: 100%;
+}
+
+/* Priority colors */
+.priority-critical {
+  color: #fff;
+  background-color: #e74a3b;
+}
+
+.priority-high {
+  color: #fff;
+  background-color: #f6c23e;
+}
+
+.priority-medium {
+  color: #fff;
+  background-color: #4e73df;
+}
+
+.priority-low {
+  color: #fff;
+  background-color: #36b9cc;
+}
+
+/* Status colors */
+.status-new {
+  color: #fff;
+  background-color: #4e73df;
+}
+
+.status-categorized, .status-prioritized {
+  color: #fff;
+  background-color: #1cc88a;
+}
+
+.status-assigned, .status-in_progress {
+  color: #fff;
+  background-color: #f6c23e;
+}
+
+.status-resolved, .status-closed {
+  color: #fff;
+  background-color: #858796;
+}
+
+.status-pending_info {
+  color: #fff;
+  background-color: #36b9cc;
+}
+
+.status-escalated {
+  color: #fff;
+  background-color: #e74a3b;
+}
+
+/* Department card styles */
+.department-card {
+  border-left: 0.25rem solid #4e73df;
+}
+
+.department-card .department-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.department-card .department-metric {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #5a5c69;
+}
+
+.department-card .department-subtitle {
+  font-size: 0.7rem;
+  color: #858796;
+}

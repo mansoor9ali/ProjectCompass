@@ -1,0 +1,14 @@
+robocorp>=2.0.0
+robocorp-tasks>=3.0.0
+rpaframework>=30.0.0
+rpaframework-core>=12.0.0
+rpaframework-email>=0.1.0
+fastapi>=0.95.1
+uvicorn>=0.22.0
+jinja2>=3.1.2
+pandas>=2.0.1
+scikit-learn>=1.2.2
+nltk>=3.8.1
+spacy>=3.5.2
+pydantic>=1.10.7
+python-dotenv>=1.0.0

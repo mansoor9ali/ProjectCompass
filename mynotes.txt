@@ -1,0 +1,70 @@
+Running ProjectCompass and Testing with demo.py
+I'll guide you through setting up and running the ProjectCompass application, with specific focus on testing with the demo.py script.
+
+Step 1: Set Up the Environment
+First, let's create and activate a virtual environment for the project:
+
+powershell
+CopyInsert
+# Navigate to your project directory
+cd c:\Projects\ProjectCompass
+
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+.\venv\Scripts\activate
+Step 2: Install Dependencies
+Once your virtual environment is activated, install the required packages:
+
+powershell
+CopyInsert
+# Install from requirements.txt
+pip install -r requirements.txt
+
+# Or install the packages directly
+pip install robocorp robocorp-tasks rpaframework rpaframework-core rpaframework-email fastapi uvicorn jinja2 pandas scikit-learn nltk spacy pydantic python-dotenv
+Step 3: Download Additional Resources
+Install the required NLTK data and spaCy model:
+
+powershell
+CopyInsert
+# Download NLTK data
+python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+
+# Download spaCy model
+python -m spacy download en_core_web_sm
+Step 4: Running the Demo
+Now you can run the demo.py script to test the system with sample email inquiries:
+
+powershell
+CopyInsert
+# Make sure you're in the project directory with your virtual environment activated
+python demo.py --email-type prequalification
+You can test different types of inquiries by changing the --email-type parameter:
+
+powershell
+CopyInsert
+# Test a finance inquiry
+python demo.py --email-type finance
+
+# Test a contract inquiry
+python demo.py --email-type contract
+
+# Test a technical issue inquiry
+python demo.py --email-type technical_issue
+Step 5: Running the Full Application
+After testing with the demo, you can run the complete application:
+
+Run the Email Inquiry Processor:
+powershell
+CopyInsert in Terminal
+python -m tasks email_inquiry_processor
+Run the Dashboard:
+powershell
+CopyInsert in Terminal
+python -m tasks run_dashboard
+Run the API Server:
+powershell
+CopyInsert in Terminal
+python api.py

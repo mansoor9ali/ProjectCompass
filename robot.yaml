@@ -1,0 +1,10 @@
+tasks:
+  Email Inquiry Processor:
+    shell: python -m tasks email_inquiry_processor
+  Dashboard Server:
+    shell: python -m tasks run_dashboard
+
+condaConfigFile: conda.yaml
+artifactsDir: output
+ignoreFiles:
+  - .gitignore
