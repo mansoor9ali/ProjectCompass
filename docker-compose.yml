@@ -1,6 +1,36 @@
 version: '3.8'
 
 services:
+  postgres_db:
+    # Use an image that includes PostgreSQL and pgvector
+    # You can pin a specific version like 'ankane/pgvector:pg16' for stability
+    image: ankane/pgvector:latest
+    container_name: postgres_with_pgvector # A custom name for the container
+    environment:
+      # Set PostgreSQL credentials and default database
+      # IMPORTANT: Change these default values for production!
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: myvectordb
+      # Optional: Define where PostgreSQL stores its data within the container
+      # PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Map host port 5432 to container port 5432
+      # Format: "HOST_PORT:CONTAINER_PORT"
+      # Change the host port (left side) if 5432 is already in use on your machine
+      - "5432:5432"
+    volumes:
+      # Mount a named volume to persist database data outside the container
+      # This ensures your data survives container restarts and removals
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped # Restart policy: restart unless manually stopped
+    # Optional Healthcheck: Checks if the database is ready to accept connections
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
   # Email testing server
   smtp4dev:
     image: rnwood/smtp4dev:v3
@@ -82,4 +112,7 @@ networks:
     name: projectcompass-network
 
 volumes:
+  # Define the named volume for persistent data storage
+  postgres_data:
+    driver: local # Specifies the volume driver (local is the default)
   smtp4dev-data:
