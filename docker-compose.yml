@@ -25,7 +25,7 @@ services:
       # Uncomment to increase logging
       # - LOGLEVEL=Trace
       
-  # ProjectCompass API Server using Robocorp
+  # ProjectCompass API Server
   projectcompass-api:
     build:
       context: ./dashboard
@@ -36,8 +36,6 @@ services:
     depends_on:
       - smtp4dev
     environment:
-      - RCC_DOCKER_ENABLE=1
-      - RCC_WORKSPACE_CONF=robot.yaml
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - EMAIL_HOST=smtp4dev
@@ -49,6 +47,39 @@ services:
       - ./models:/app/models
       - ./services:/app/services
       - ./agent_system:/app/agent_system
+      - ./data:/app/data
+    # Use simplified healthcheck that doesn't require curl
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      
+  # ProjectCompass Frontend (React App)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - projectcompass-api
+    # Set up a network alias for better connectivity
+    networks:
+      default:
+        aliases:
+          - frontend
+    environment:
+      # Use absolute URL with host.docker.internal to access API from React app
+      - REACT_APP_API_URL=http://host.docker.internal:8000
+      - NODE_ENV=production
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  default:
+    name: projectcompass-network
 
 volumes:
   smtp4dev-data:
