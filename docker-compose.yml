@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Service with pgvector
   postgres_db:
     # Use an image that includes PostgreSQL and pgvector
     # You can pin a specific version like 'ankane/pgvector:pg16' for stability
@@ -31,6 +32,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # pgAdmin 4 Service
+  pgadmin:
+    image: dpage/pgadmin4:latest # Use the official pgAdmin 4 image. Consider pinning e.g., :8
+    container_name: pgadmin4_server
+    environment:
+      # Set the login credentials for the pgAdmin web interface
+      # IMPORTANT: Change these default values!
+      PGADMIN_DEFAULT_EMAIL: admin@example.com # Login username for pgAdmin
+      PGADMIN_DEFAULT_PASSWORD: myadminpassword # Login password for pgAdmin
+      PGADMIN_LISTEN_PORT: 80 # Port pgAdmin listens on inside the container
+    ports:
+      # Map host port 5050 to container port 80 (pgAdmin's default web server port)
+      # Access pgAdmin via http://localhost:5050
+      # Change '5050' if that port is busy on your host machine
+      - "5050:80"
+    volumes:
+      # Persists pgAdmin configuration and server definitions
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      # Ensures PostgreSQL is healthy before starting pgAdmin
+      postgres_db:
+        condition: service_healthy
+    restart: unless-stopped
+    
   # Email testing server
   smtp4dev:
     image: rnwood/smtp4dev:v3
@@ -115,4 +141,6 @@ volumes:
   # Define the named volume for persistent data storage
   postgres_data:
     driver: local # Specifies the volume driver (local is the default)
+  pgadmin_data:
+    driver: local    
   smtp4dev-data:
