@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # Email testing server
+  smtp4dev:
+    image: rnwood/smtp4dev:v3
+    restart: always
+    ports:
+      # Web interface port
+      - "5000:80"
+      # SMTP server port
+      - "25:25"
+      # IMAP server port (if needed)
+      - "143:143"
+    volumes:
+      # Persistent data storage
+      - smtp4dev-data:/smtp4dev
+    environment:
+      - SERVER_NAME=smtp4dev
+      - SERVERTYPE=smtp
+      - BasePath=/
+      - TlsMode=StartTls
+      - NumberOfMessagesToKeep=100
+      - NumberOfSessionsToKeep=100
+      # Uncomment to increase logging
+      # - LOGLEVEL=Trace
+      
+  # ProjectCompass API Server using Robocorp
+  projectcompass-api:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      - smtp4dev
+    environment:
+      - RCC_DOCKER_ENABLE=1
+      - RCC_WORKSPACE_CONF=robot.yaml
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - EMAIL_HOST=smtp4dev
+      - EMAIL_PORT=25
+      - EMAIL_USE_TLS=false
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./services:/app/services
+      - ./agent_system:/app/agent_system
+
+volumes:
+  smtp4dev-data:
