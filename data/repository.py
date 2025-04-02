@@ -8,6 +8,8 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
+import psycopg2
+from psycopg2.extras import RealDictCursor, Json
 
 from models.inquiry import Inquiry, InquiryStatus
 from models.vendor import Vendor
@@ -18,44 +20,123 @@ logger = logging.getLogger(__name__)
 class Repository:
     """
     Data repository for storing and retrieving vendor and inquiry data.
-    In a production environment, this would use a proper database.
-    This implementation uses JSON files for simplicity.
+    Uses PostgreSQL database for storage.
     """
     
     def __init__(self, data_dir: str = None):
         """
-        Initialize the repository.
+        Initialize the repository with PostgreSQL connection.
         
         Args:
-            data_dir: Directory to store data files. Defaults to 'data/storage'.
+            data_dir: Directory for legacy data files (kept for backwards compatibility).
         """
+        # Keep data_dir for backwards compatibility during migration
         self.data_dir = data_dir or os.path.join(os.path.dirname(__file__), 'storage')
-        
-        # Create data directory if it doesn't exist
         Path(self.data_dir).mkdir(parents=True, exist_ok=True)
         
-        # Initialize storage paths
-        self.vendors_file = os.path.join(self.data_dir, 'vendors.json')
-        self.inquiries_file = os.path.join(self.data_dir, 'inquiries.json')
+        # PostgreSQL connection settings from docker-compose environment
+        self.db_config = {
+            'host': 'localhost',  # Use 'postgres_db' when running inside docker network
+            'port': 5432,
+            'user': 'myuser',
+            'password': 'mysecretpassword',
+            'database': 'myvectordb'
+        }
         
-        # Create storage files if they don't exist
-        self._initialize_storage()
+        # Initialize database and tables
+        self._initialize_database()
         
-        logger.info(f"Repository initialized with data directory: {self.data_dir}")
+        logger.info(f"Repository initialized with PostgreSQL database: {self.db_config['database']}")
     
-    def _initialize_storage(self):
-        """Initialize storage files if they don't exist."""
-        # Initialize vendors file
-        if not os.path.exists(self.vendors_file):
-            with open(self.vendors_file, 'w') as f:
-                json.dump([], f)
-            logger.info(f"Created vendors storage file: {self.vendors_file}")
-        
-        # Initialize inquiries file
-        if not os.path.exists(self.inquiries_file):
-            with open(self.inquiries_file, 'w') as f:
-                json.dump([], f)
-            logger.info(f"Created inquiries storage file: {self.inquiries_file}")
+    def _prepare_for_json(self, obj):
+        """Prepare an object for JSON serialization, converting datetime objects to ISO strings."""
+        if isinstance(obj, dict):
+            return {k: self._prepare_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._prepare_for_json(i) for i in obj]
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        else:
+            return obj
+            
+    def _get_connection(self):
+        """Get a PostgreSQL database connection."""
+        try:
+            connection = psycopg2.connect(
+                host=self.db_config['host'],
+                port=self.db_config['port'],
+                user=self.db_config['user'],
+                password=self.db_config['password'],
+                database=self.db_config['database']
+            )
+            return connection
+        except Exception as e:
+            logger.error(f"Database connection error: {str(e)}")
+            raise
+    
+    def _initialize_database(self):
+        """Initialize database tables if they don't exist."""
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            # Drop existing tables to ensure schema consistency
+            # Comment out these DROP statements after successful migration in production
+            cursor.execute("DROP TABLE IF EXISTS inquiries CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS vendors CASCADE")
+            
+            # Create inquiries table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inquiries (
+                    id VARCHAR(50) PRIMARY KEY,
+                    vendor_id VARCHAR(50),
+                    vendor_name VARCHAR(255),
+                    status VARCHAR(50) NOT NULL,
+                    category VARCHAR(100),
+                    priority VARCHAR(50),
+                    assigned_to VARCHAR(100),
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL,
+                    due_by TIMESTAMP,
+                    email_metadata JSONB,
+                    raw_content TEXT,
+                    processed_content TEXT,
+                    confidence_score NUMERIC,
+                    tags JSONB,
+                    notes JSONB,
+                    related_inquiries JSONB,
+                    metadata JSONB
+                )
+            """)
+            
+            # Create vendors table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vendors (
+                    id VARCHAR(50) PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    category VARCHAR(100),
+                    status VARCHAR(50),
+                    registration_date TIMESTAMP NOT NULL,
+                    prequalification_status VARCHAR(100),
+                    contract_status VARCHAR(100),
+                    financial_status VARCHAR(100),
+                    contacts JSONB,
+                    performance JSONB,
+                    tags JSONB,
+                    metadata JSONB
+                )
+            """)
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            
+            logger.info("Database tables initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Database initialization error: {str(e)}")
+            # If database connection fails, we could fall back to file-based storage
+            logger.warning("Database initialization failed, might fall back to file storage")
     
     def save_inquiry(self, inquiry: Inquiry) -> bool:
         """
@@ -68,32 +149,95 @@ class Repository:
             True if saved successfully, False otherwise
         """
         try:
-            # Load existing inquiries
-            inquiries = self._load_data(self.inquiries_file)
+            connection = self._get_connection()
+            cursor = connection.cursor()
             
-            # Convert inquiry to dictionary
+            # Convert inquiry to dictionary and prepare for JSON serialization
             inquiry_dict = inquiry.to_dict()
             
-            # Convert datetime objects to ISO format strings
-            inquiry_dict['created_at'] = inquiry_dict['created_at'].isoformat()
-            inquiry_dict['updated_at'] = inquiry_dict['updated_at'].isoformat()
-            if inquiry_dict.get('due_by'):
-                inquiry_dict['due_by'] = inquiry_dict['due_by'].isoformat()
-            
             # Check if inquiry already exists
-            existing_idx = next((i for i, inq in enumerate(inquiries) 
-                               if inq.get('id') == inquiry_dict['id']), None)
+            cursor.execute("SELECT id FROM inquiries WHERE id = %s", (inquiry_dict['id'],))
+            exists = cursor.fetchone() is not None
             
-            # Update or append
-            if existing_idx is not None:
-                inquiries[existing_idx] = inquiry_dict
+            if exists:
+                # Update existing inquiry using the current model structure
+                cursor.execute("""
+                    UPDATE inquiries SET
+                        vendor_id = %s,
+                        vendor_name = %s,
+                        status = %s,
+                        category = %s,
+                        priority = %s,
+                        assigned_to = %s,
+                        created_at = %s,
+                        updated_at = %s,
+                        due_by = %s,
+                        email_metadata = %s,
+                        raw_content = %s,
+                        processed_content = %s,
+                        confidence_score = %s,
+                        tags = %s,
+                        notes = %s,
+                        related_inquiries = %s,
+                        metadata = %s
+                    WHERE id = %s
+                """, (
+                    inquiry_dict.get('vendor_id'),
+                    inquiry_dict.get('vendor_name'),
+                    inquiry_dict['status'],
+                    inquiry_dict['category'],
+                    inquiry_dict.get('priority'),
+                    inquiry_dict.get('assigned_to'),
+                    inquiry_dict['created_at'],
+                    inquiry_dict['updated_at'],
+                    inquiry_dict.get('due_by'),
+                    Json(self._prepare_for_json(inquiry_dict['email_metadata'])),
+                    inquiry_dict['raw_content'],
+                    inquiry_dict.get('processed_content'),
+                    inquiry_dict.get('confidence_score', 0.0),
+                    Json(self._prepare_for_json(inquiry_dict.get('tags', []))),
+                    Json(self._prepare_for_json(inquiry_dict.get('notes', []))),
+                    Json(self._prepare_for_json(inquiry_dict.get('related_inquiries', []))),
+                    Json(self._prepare_for_json(inquiry_dict.get('metadata', {}))),
+                    inquiry_dict['id']
+                ))
                 logger.info(f"Updated inquiry: {inquiry.id}")
             else:
-                inquiries.append(inquiry_dict)
+                # Insert new inquiry
+                cursor.execute("""
+                    INSERT INTO inquiries (
+                        id, vendor_id, vendor_name, status, category, priority,
+                        assigned_to, created_at, updated_at, due_by,
+                        email_metadata, raw_content, processed_content,
+                        confidence_score, tags, notes, related_inquiries, metadata
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                """, (
+                    inquiry_dict['id'],
+                    inquiry_dict.get('vendor_id'),
+                    inquiry_dict.get('vendor_name'),
+                    inquiry_dict['status'],
+                    inquiry_dict['category'],
+                    inquiry_dict.get('priority'),
+                    inquiry_dict.get('assigned_to'),
+                    inquiry_dict['created_at'],
+                    inquiry_dict['updated_at'],
+                    inquiry_dict.get('due_by'),
+                    Json(self._prepare_for_json(inquiry_dict['email_metadata'])),
+                    inquiry_dict['raw_content'],
+                    inquiry_dict.get('processed_content'),
+                    inquiry_dict.get('confidence_score', 0.0),
+                    Json(self._prepare_for_json(inquiry_dict.get('tags', []))),
+                    Json(self._prepare_for_json(inquiry_dict.get('notes', []))),
+                    Json(self._prepare_for_json(inquiry_dict.get('related_inquiries', []))),
+                    Json(self._prepare_for_json(inquiry_dict.get('metadata', {})))
+                ))
                 logger.info(f"Added new inquiry: {inquiry.id}")
             
-            # Save back to file
-            self._save_data(self.inquiries_file, inquiries)
+            connection.commit()
+            cursor.close()
+            connection.close()
             
             return True
             
@@ -112,12 +256,28 @@ class Repository:
             Inquiry dictionary or None if not found
         """
         try:
-            inquiries = self._load_data(self.inquiries_file)
+            connection = self._get_connection()
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
             
-            # Find inquiry by ID
-            inquiry = next((inq for inq in inquiries if inq.get('id') == inquiry_id), None)
+            cursor.execute("SELECT * FROM inquiries WHERE id = %s", (inquiry_id,))
+            inquiry = cursor.fetchone()
             
-            return inquiry
+            cursor.close()
+            connection.close()
+            
+            # Convert result to dictionary if found
+            if inquiry:
+                # Convert to regular dict from RealDictRow
+                inquiry = dict(inquiry)
+                
+                # Convert JSONB fields to dict
+                for field in ['email_metadata', 'tags', 'notes', 'related_inquiries', 'metadata']:
+                    if inquiry.get(field):
+                        inquiry[field] = dict(inquiry[field])
+                
+                return inquiry
+            
+            return None
             
         except Exception as e:
             logger.error(f"Error getting inquiry: {str(e)}")
@@ -141,24 +301,62 @@ class Repository:
             List of inquiry dictionaries
         """
         try:
-            inquiries = self._load_data(self.inquiries_file)
+            connection = self._get_connection()
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            
+            query = "SELECT * FROM inquiries"
+            params = []
+            where_clauses = []
             
             # Apply filters
             if status:
-                status_list = [status] if isinstance(status, str) else status
-                inquiries = [inq for inq in inquiries if inq.get('status') in status_list]
+                if isinstance(status, str):
+                    where_clauses.append("status = %s")
+                    params.append(status)
+                else:
+                    placeholders = ", ".join(["%s"] * len(status))
+                    where_clauses.append(f"status IN ({placeholders})")
+                    params.extend(status)
             
             if category:
-                category_list = [category] if isinstance(category, str) else category
-                inquiries = [inq for inq in inquiries if inq.get('category') in category_list]
+                if isinstance(category, str):
+                    where_clauses.append("category = %s")
+                    params.append(category)
+                else:
+                    placeholders = ", ".join(["%s"] * len(category))
+                    where_clauses.append(f"category IN ({placeholders})")
+                    params.extend(category)
             
-            # Sort by created_at date (newest first)
-            inquiries.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            # Add WHERE clause if filters are present
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
             
-            # Apply pagination
-            paginated = inquiries[offset:offset + limit]
+            # Add ORDER BY clause
+            query += " ORDER BY created_at DESC"
             
-            return paginated
+            # Add pagination
+            query += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+            
+            cursor.execute(query, params)
+            inquiries = cursor.fetchall()
+            
+            cursor.close()
+            connection.close()
+            
+            # Convert to dict and process JSONB fields
+            result = []
+            for inquiry in inquiries:
+                inquiry_dict = dict(inquiry)
+                
+                # Convert JSONB fields to dict
+                for field in ['email_metadata', 'tags', 'notes', 'related_inquiries', 'metadata']:
+                    if inquiry_dict.get(field):
+                        inquiry_dict[field] = dict(inquiry_dict[field])
+                
+                result.append(inquiry_dict)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error getting inquiries: {str(e)}")
@@ -175,31 +373,76 @@ class Repository:
             True if saved successfully, False otherwise
         """
         try:
-            # Load existing vendors
-            vendors = self._load_data(self.vendors_file)
+            connection = self._get_connection()
+            cursor = connection.cursor()
             
-            # Convert vendor to dictionary
+            # Convert vendor to dictionary and prepare for JSON serialization
             vendor_dict = vendor.to_dict()
             
-            # Convert datetime objects to ISO format strings
-            vendor_dict['registration_date'] = vendor_dict['registration_date'].isoformat()
-            if vendor_dict.get('performance', {}).get('last_updated'):
-                vendor_dict['performance']['last_updated'] = vendor_dict['performance']['last_updated'].isoformat()
-            
             # Check if vendor already exists
-            existing_idx = next((i for i, v in enumerate(vendors) 
-                               if v.get('id') == vendor_dict['id']), None)
+            cursor.execute("SELECT id FROM vendors WHERE id = %s", (vendor_dict['id'],))
+            exists = cursor.fetchone() is not None
             
-            # Update or append
-            if existing_idx is not None:
-                vendors[existing_idx] = vendor_dict
+            if exists:
+                # Update existing vendor
+                cursor.execute("""
+                    UPDATE vendors SET
+                        name = %s,
+                        category = %s,
+                        status = %s,
+                        registration_date = %s,
+                        prequalification_status = %s,
+                        contract_status = %s,
+                        financial_status = %s,
+                        contacts = %s,
+                        performance = %s,
+                        tags = %s,
+                        metadata = %s
+                    WHERE id = %s
+                """, (
+                    vendor_dict['name'],
+                    vendor_dict['category'],
+                    vendor_dict['status'],
+                    vendor_dict['registration_date'],
+                    vendor_dict.get('prequalification_status'),
+                    vendor_dict.get('contract_status'),
+                    vendor_dict.get('financial_status'),
+                    Json(self._prepare_for_json(vendor_dict.get('contacts', []))),
+                    Json(self._prepare_for_json(vendor_dict.get('performance', {}))),
+                    Json(self._prepare_for_json(vendor_dict.get('tags', []))),
+                    Json(self._prepare_for_json(vendor_dict.get('metadata', {}))),
+                    vendor_dict['id']
+                ))
                 logger.info(f"Updated vendor: {vendor.id}")
             else:
-                vendors.append(vendor_dict)
+                # Insert new vendor
+                cursor.execute("""
+                    INSERT INTO vendors (
+                        id, name, category, status, registration_date,
+                        prequalification_status, contract_status, financial_status,
+                        contacts, performance, tags, metadata
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                """, (
+                    vendor_dict['id'],
+                    vendor_dict['name'],
+                    vendor_dict['category'],
+                    vendor_dict['status'],
+                    vendor_dict['registration_date'],
+                    vendor_dict.get('prequalification_status'),
+                    vendor_dict.get('contract_status'),
+                    vendor_dict.get('financial_status'),
+                    Json(self._prepare_for_json(vendor_dict.get('contacts', []))),
+                    Json(self._prepare_for_json(vendor_dict.get('performance', {}))),
+                    Json(self._prepare_for_json(vendor_dict.get('tags', []))),
+                    Json(self._prepare_for_json(vendor_dict.get('metadata', {})))
+                ))
                 logger.info(f"Added new vendor: {vendor.id}")
             
-            # Save back to file
-            self._save_data(self.vendors_file, vendors)
+            connection.commit()
+            cursor.close()
+            connection.close()
             
             return True
             
@@ -218,12 +461,28 @@ class Repository:
             Vendor dictionary or None if not found
         """
         try:
-            vendors = self._load_data(self.vendors_file)
+            connection = self._get_connection()
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
             
-            # Find vendor by ID
-            vendor = next((v for v in vendors if v.get('id') == vendor_id), None)
+            cursor.execute("SELECT * FROM vendors WHERE id = %s", (vendor_id,))
+            vendor = cursor.fetchone()
             
-            return vendor
+            cursor.close()
+            connection.close()
+            
+            # Convert result to dictionary if found
+            if vendor:
+                # Convert to regular dict from RealDictRow
+                vendor = dict(vendor)
+                
+                # Convert JSONB fields to dict
+                for field in ['contacts', 'performance', 'tags', 'metadata']:
+                    if vendor.get(field):
+                        vendor[field] = dict(vendor[field])
+                
+                return vendor
+            
+            return None
             
         except Exception as e:
             logger.error(f"Error getting vendor: {str(e)}")
@@ -247,22 +506,52 @@ class Repository:
             List of vendor dictionaries
         """
         try:
-            vendors = self._load_data(self.vendors_file)
+            connection = self._get_connection()
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            
+            query = "SELECT * FROM vendors"
+            params = []
+            where_clauses = []
             
             # Apply filters
             if status:
-                vendors = [v for v in vendors if v.get('status') == status]
+                where_clauses.append("status = %s")
+                params.append(status)
             
             if category:
-                vendors = [v for v in vendors if v.get('category') == category]
+                where_clauses.append("category = %s")
+                params.append(category)
             
-            # Sort by name
-            vendors.sort(key=lambda x: x.get('name', ''))
+            # Add WHERE clause if filters are present
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
             
-            # Apply pagination
-            paginated = vendors[offset:offset + limit]
+            # Add ORDER BY clause
+            query += " ORDER BY name ASC"
             
-            return paginated
+            # Add pagination
+            query += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+            
+            cursor.execute(query, params)
+            vendors = cursor.fetchall()
+            
+            cursor.close()
+            connection.close()
+            
+            # Convert to dict and process JSONB fields
+            result = []
+            for vendor in vendors:
+                vendor_dict = dict(vendor)
+                
+                # Convert JSONB fields to dict
+                for field in ['contacts', 'performance', 'tags', 'metadata']:
+                    if vendor_dict.get(field):
+                        vendor_dict[field] = dict(vendor_dict[field])
+                
+                result.append(vendor_dict)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error getting vendors: {str(e)}")
@@ -280,30 +569,29 @@ class Repository:
             True if updated successfully, False otherwise
         """
         try:
-            # Get inquiry
-            inquiry = self.get_inquiry(inquiry_id)
-            if not inquiry:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            # Update status and updated_at timestamp
+            cursor.execute("""
+                UPDATE inquiries 
+                SET status = %s, updated_at = %s 
+                WHERE id = %s
+            """, (status, datetime.now(), inquiry_id))
+            
+            # Check if any row was affected
+            affected = cursor.rowcount > 0
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            
+            if affected:
+                logger.info(f"Updated inquiry status: {inquiry_id} -> {status}")
+                return True
+            else:
                 logger.warning(f"Inquiry not found: {inquiry_id}")
                 return False
-            
-            # Update status
-            inquiry['status'] = status
-            inquiry['updated_at'] = datetime.now().isoformat()
-            
-            # Save back to storage
-            inquiries = self._load_data(self.inquiries_file)
-            
-            # Find and update
-            for i, inq in enumerate(inquiries):
-                if inq.get('id') == inquiry_id:
-                    inquiries[i] = inquiry
-                    break
-            
-            # Save
-            self._save_data(self.inquiries_file, inquiries)
-            
-            logger.info(f"Updated inquiry status: {inquiry_id} -> {status}")
-            return True
             
         except Exception as e:
             logger.error(f"Error updating inquiry status: {str(e)}")
@@ -320,12 +608,23 @@ class Repository:
             Count of inquiries
         """
         try:
-            inquiries = self._load_data(self.inquiries_file)
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            query = "SELECT COUNT(*) FROM inquiries"
+            params = []
             
             if status:
-                inquiries = [inq for inq in inquiries if inq.get('status') == status]
+                query += " WHERE status = %s"
+                params.append(status)
             
-            return len(inquiries)
+            cursor.execute(query, params)
+            count = cursor.fetchone()[0]
+            
+            cursor.close()
+            connection.close()
+            
+            return count
             
         except Exception as e:
             logger.error(f"Error getting inquiry count: {str(e)}")
@@ -342,37 +641,73 @@ class Repository:
             Count of vendors
         """
         try:
-            vendors = self._load_data(self.vendors_file)
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            query = "SELECT COUNT(*) FROM vendors"
+            params = []
             
             if status:
-                vendors = [v for v in vendors if v.get('status') == status]
+                query += " WHERE status = %s"
+                params.append(status)
             
-            return len(vendors)
+            cursor.execute(query, params)
+            count = cursor.fetchone()[0]
+            
+            cursor.close()
+            connection.close()
+            
+            return count
             
         except Exception as e:
             logger.error(f"Error getting vendor count: {str(e)}")
             return 0
     
-    def _load_data(self, file_path: str) -> List[Dict[str, Any]]:
-        """Load data from a JSON file."""
+    def _migrate_legacy_data(self):
+        """Migrate data from JSON files to PostgreSQL database."""
         try:
-            with open(file_path, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            logger.warning(f"File not found: {file_path}, creating empty file")
-            with open(file_path, 'w') as f:
-                json.dump([], f)
-            return []
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON in file: {file_path}, resetting to empty list")
-            with open(file_path, 'w') as f:
-                json.dump([], f)
-            return []
-    
-    def _save_data(self, file_path: str, data: List[Dict[str, Any]]):
-        """Save data to a JSON file."""
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
+            # Migrate inquiries
+            if os.path.exists(os.path.join(self.data_dir, 'inquiries.json')):
+                with open(os.path.join(self.data_dir, 'inquiries.json'), 'r') as f:
+                    inquiries = json.load(f)
+                
+                for inquiry_dict in inquiries:
+                    # Convert string dates back to datetime objects for Inquiry constructor
+                    if 'created_at' in inquiry_dict and isinstance(inquiry_dict['created_at'], str):
+                        inquiry_dict['created_at'] = datetime.fromisoformat(inquiry_dict['created_at'])
+                    if 'updated_at' in inquiry_dict and isinstance(inquiry_dict['updated_at'], str):
+                        inquiry_dict['updated_at'] = datetime.fromisoformat(inquiry_dict['updated_at'])
+                    if 'due_by' in inquiry_dict and inquiry_dict['due_by'] and isinstance(inquiry_dict['due_by'], str):
+                        inquiry_dict['due_by'] = datetime.fromisoformat(inquiry_dict['due_by'])
+                    
+                    # Create Inquiry object and save to database
+                    inquiry = Inquiry.from_dict(inquiry_dict)
+                    self.save_inquiry(inquiry)
+                
+                logger.info(f"Migrated {len(inquiries)} inquiries from JSON to PostgreSQL")
+            
+            # Migrate vendors
+            if os.path.exists(os.path.join(self.data_dir, 'vendors.json')):
+                with open(os.path.join(self.data_dir, 'vendors.json'), 'r') as f:
+                    vendors = json.load(f)
+                
+                for vendor_dict in vendors:
+                    # Convert string dates back to datetime objects for Vendor constructor
+                    if 'registration_date' in vendor_dict and isinstance(vendor_dict['registration_date'], str):
+                        vendor_dict['registration_date'] = datetime.fromisoformat(vendor_dict['registration_date'])
+                    if 'performance' in vendor_dict and vendor_dict['performance'].get('last_updated') and isinstance(vendor_dict['performance']['last_updated'], str):
+                        vendor_dict['performance']['last_updated'] = datetime.fromisoformat(vendor_dict['performance']['last_updated'])
+                    
+                    # Create Vendor object and save to database
+                    vendor = Vendor.from_dict(vendor_dict)
+                    self.save_vendor(vendor)
+                
+                logger.info(f"Migrated {len(vendors)} vendors from JSON to PostgreSQL")
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error migrating legacy data: {str(e)}")
+            return False
 
 
 # Singleton repository instance
@@ -383,4 +718,9 @@ def get_repository() -> Repository:
     global _repository
     if _repository is None:
         _repository = Repository()
+        
+        # Attempt to migrate legacy data when first accessing the repository
+        # Only uncomment this if you want to migrate data automatically on first access
+        # _repository._migrate_legacy_data()
+        
     return _repository
