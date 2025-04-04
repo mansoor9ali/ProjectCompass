@@ -12,6 +12,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 
+# Import the repository to access database data
+from data.repository import get_repository
+
 # Initialize logging
 logger = logging.getLogger(__name__)
 
@@ -64,8 +67,8 @@ async def root():
             "/api/system/status",
             "/api/inquiries/recent",
             "/api/inquiries/submit",
-            "/api/stats/departments",
-            "/api/stats/categories"
+            "/api/departments/stats",
+            "/api/categories/distribution"
         ]
     }
 
@@ -158,34 +161,113 @@ async def submit_inquiry(inquiry: InquiryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/stats/departments")
+@app.get("/api/departments/stats")
 async def get_department_stats():
     """Get statistics for departments."""
-    # This would fetch from a database in a real implementation
-    return {
-        "departments": [
-            {"name": "Registration", "inquiry_count": 42, "avg_response_time": 8.5},
-            {"name": "Finance", "inquiry_count": 27, "avg_response_time": 12.3},
-            {"name": "Contracts", "inquiry_count": 19, "avg_response_time": 24.7},
-            {"name": "Technical Support", "inquiry_count": 35, "avg_response_time": 4.2}
-        ]
-    }
+    try:
+        # Get the repository instance
+        repository = get_repository()
+        
+        # Get departments from the database
+        departments = repository.get_departments()
+        
+        # Transform the data to match the expected format for the frontend
+        transformed_departments = []
+        for dept in departments:
+            transformed_departments.append({
+                "name": dept["name"],
+                "inquiry_count": dept["inquiry_count"],
+                "avg_response_time": dept["avg_response_time"],
+                "load": dept["load"]
+            })
+        
+        logger.info(f"Retrieved {len(transformed_departments)} departments")
+        return {
+            "departments": transformed_departments
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving department stats: {str(e)}")
+        # Fallback to static data in case of error
+        return {
+            "departments": [
+                {"name": "Registration", "inquiry_count": 42, "avg_response_time": 8.5, "load": 65},
+                {"name": "Finance", "inquiry_count": 27, "avg_response_time": 12.3, "load": 45},
+                {"name": "Contracts", "inquiry_count": 19, "avg_response_time": 24.7, "load": 35},
+                {"name": "Technical Support", "inquiry_count": 35, "avg_response_time": 4.2, "load": 55}
+            ]
+        }
 
 
-@app.get("/api/stats/categories")
+@app.get("/api/categories/distribution")
 async def get_category_distribution():
     """Get distribution of inquiries by category."""
-    # This would fetch from a database in a real implementation
-    return {
-        "categories": [
-            {"name": "prequalification", "count": 30, "percentage": 25},
-            {"name": "finance", "count": 24, "percentage": 20},
-            {"name": "contract", "count": 18, "percentage": 15},
-            {"name": "bidding", "count": 12, "percentage": 10},
-            {"name": "technical", "count": 24, "percentage": 20},
-            {"name": "information", "count": 12, "percentage": 10}
-        ]
-    }
+    try:
+        # Get the repository instance
+        repository = get_repository()
+        
+        # Get categories from the database
+        categories = repository.get_categories()
+        
+        # Transform the data to match the expected format for the frontend
+        transformed_categories = []
+        for cat in categories:
+            transformed_categories.append({
+                "name": cat["name"],
+                "count": cat["count"],
+                "percentage": cat["percentage"]
+            })
+        
+        logger.info(f"Retrieved {len(transformed_categories)} categories")
+        return {
+            "categories": transformed_categories
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving category distribution: {str(e)}")
+        # Fallback to static data in case of error
+        return {
+            "categories": [
+                {"name": "prequalification", "count": 30, "percentage": 25},
+                {"name": "finance", "count": 24, "percentage": 20},
+                {"name": "contract", "count": 18, "percentage": 15},
+                {"name": "bidding", "count": 12, "percentage": 10},
+                {"name": "technical", "count": 24, "percentage": 20},
+                {"name": "information", "count": 12, "percentage": 10}
+            ]
+        }
+
+
+@app.post("/api/stats/categories/{category_id}")
+async def update_category(category_id: str, data: Dict[str, Any]):
+    """Update a category's information."""
+    try:
+        repository = get_repository()
+        success = repository.update_category(category_id, data)
+        
+        if success:
+            # Recalculate percentages after updating a category
+            repository.recalculate_category_percentages()
+            return {"status": "success", "message": f"Category {category_id} updated successfully"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Category {category_id} not found")
+    except Exception as e:
+        logger.error(f"Error updating category: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/stats/departments/{department_id}")
+async def update_department(department_id: str, data: Dict[str, Any]):
+    """Update a department's information."""
+    try:
+        repository = get_repository()
+        success = repository.update_department(department_id, data)
+        
+        if success:
+            return {"status": "success", "message": f"Department {department_id} updated successfully"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Department {department_id} not found")
+    except Exception as e:
+        logger.error(f"Error updating department: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def run_dashboard_server(host="127.0.0.1", port=8000, agent_mgr=None):

@@ -23,6 +23,7 @@ const defaultConfig: AppConfig = {
 const environmentConfigs: Record<string, Partial<AppConfig>> = {
   development: {
     // Development-specific settings (same as default)
+
   },
   test: {
     // Test environment settings
@@ -33,7 +34,7 @@ const environmentConfigs: Record<string, Partial<AppConfig>> = {
   },
   production: {
     // Production environment settings
-    apiBaseUrl: '/api', // Relative path for same-origin API in production
+    apiBaseUrl: 'http://projectcompass-api:8000/api', // Relative path for same-origin API in production
     refreshIntervals: {
       dashboard: 120000,  // 2 minutes
       inquiries: 180000   // 3 minutes
@@ -63,4 +64,5 @@ const buildConfig = (): AppConfig => {
 
 // Export the configuration
 const appConfig = buildConfig();
+console.log(appConfig);
 export default appConfig;

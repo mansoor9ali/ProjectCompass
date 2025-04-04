@@ -36,7 +36,7 @@ class Repository:
         
         # PostgreSQL connection settings from docker-compose environment
         self.db_config = {
-            'host': 'localhost',  # Use 'postgres_db' when running inside docker network
+            'host': 'postgres_db',  # Use 'postgres_db' when running inside docker network
             'port': 5432,
             'user': 'myuser',
             'password': 'mysecretpassword',
@@ -84,6 +84,8 @@ class Repository:
             # Comment out these DROP statements after successful migration in production
             cursor.execute("DROP TABLE IF EXISTS inquiries CASCADE")
             cursor.execute("DROP TABLE IF EXISTS vendors CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS categories CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS departments CASCADE")
             
             # Create inquiries table
             cursor.execute("""
@@ -126,6 +128,61 @@ class Repository:
                     metadata JSONB
                 )
             """)
+            
+            # Create categories table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS categories (
+                    id VARCHAR(50) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    count INTEGER DEFAULT 0,
+                    percentage NUMERIC DEFAULT 0,
+                    color VARCHAR(50),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create departments table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS departments (
+                    id VARCHAR(50) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    inquiry_count INTEGER DEFAULT 0,
+                    avg_response_time NUMERIC DEFAULT 0,
+                    load INTEGER DEFAULT 0,
+                    manager VARCHAR(100),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Insert initial data for categories if table is empty
+            cursor.execute("SELECT COUNT(*) FROM categories")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    INSERT INTO categories (id, name, description, count, percentage, color)
+                    VALUES
+                    ('cat-001', 'prequalification', 'Prequalification inquiries', 30, 25, '#FF6384'),
+                    ('cat-002', 'finance', 'Finance-related inquiries', 24, 20, '#36A2EB'),
+                    ('cat-003', 'contract', 'Contract-related inquiries', 18, 15, '#FFCE56'),
+                    ('cat-004', 'bidding', 'Bidding-related inquiries', 12, 10, '#4BC0C0'),
+                    ('cat-005', 'technical', 'Technical support inquiries', 24, 20, '#9966FF'),
+                    ('cat-006', 'information', 'Information requests', 12, 10, '#FF9F40')
+                """)
+            
+            # Insert initial data for departments if table is empty
+            cursor.execute("SELECT COUNT(*) FROM departments")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    INSERT INTO departments (id, name, description, inquiry_count, avg_response_time, load)
+                    VALUES
+                    ('dept-001', 'Registration', 'Handles vendor registration and prequalification', 42, 8.5, 65),
+                    ('dept-002', 'Finance', 'Manages financial aspects of vendor relationships', 27, 12.3, 45),
+                    ('dept-003', 'Contracts', 'Handles contract negotiations and management', 19, 24.7, 35),
+                    ('dept-004', 'Technical Support', 'Provides technical assistance to vendors', 35, 4.2, 55)
+                """)
             
             connection.commit()
             cursor.close()
@@ -662,6 +719,208 @@ class Repository:
         except Exception as e:
             logger.error(f"Error getting vendor count: {str(e)}")
             return 0
+    
+    def get_categories(self) -> List[Dict[str, Any]]:
+        """
+        Get all categories with their statistics.
+        
+        Returns:
+            List of category dictionaries
+        """
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT id, name, description, count, percentage, color
+                FROM categories
+                ORDER BY name ASC
+            """)
+            
+            categories = cursor.fetchall()
+            
+            cursor.close()
+            connection.close()
+            
+            # Convert RealDictRow objects to regular dictionaries
+            return [dict(category) for category in categories]
+            
+        except Exception as e:
+            logger.error(f"Error getting categories: {str(e)}")
+            return []
+    
+    def get_departments(self) -> List[Dict[str, Any]]:
+        """
+        Get all departments with their statistics.
+        
+        Returns:
+            List of department dictionaries
+        """
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT id, name, description, inquiry_count, avg_response_time, load, manager
+                FROM departments
+                ORDER BY name ASC
+            """)
+            
+            departments = cursor.fetchall()
+            
+            cursor.close()
+            connection.close()
+            
+            # Convert RealDictRow objects to regular dictionaries
+            return [dict(department) for department in departments]
+            
+        except Exception as e:
+            logger.error(f"Error getting departments: {str(e)}")
+            return []
+    
+    def update_category(self, category_id: str, data: Dict[str, Any]) -> bool:
+        """
+        Update a category's information.
+        
+        Args:
+            category_id: ID of the category to update
+            data: Dictionary of fields to update
+            
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            # Build the SET clause dynamically based on the data provided
+            set_clauses = []
+            params = []
+            
+            for key, value in data.items():
+                if key not in ['id']:  # Don't allow updating the ID
+                    set_clauses.append(f"{key} = %s")
+                    params.append(value)
+            
+            # Add updated_at timestamp
+            set_clauses.append("updated_at = %s")
+            params.append(datetime.now())
+            
+            # Add category_id as the last parameter
+            params.append(category_id)
+            
+            query = f"""
+                UPDATE categories 
+                SET {', '.join(set_clauses)}
+                WHERE id = %s
+            """
+            
+            cursor.execute(query, params)
+            affected = cursor.rowcount > 0
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            
+            if affected:
+                logger.info(f"Updated category: {category_id}")
+                return True
+            else:
+                logger.warning(f"Category not found: {category_id}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error updating category: {str(e)}")
+            return False
+    
+    def update_department(self, department_id: str, data: Dict[str, Any]) -> bool:
+        """
+        Update a department's information.
+        
+        Args:
+            department_id: ID of the department to update
+            data: Dictionary of fields to update
+            
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            # Build the SET clause dynamically based on the data provided
+            set_clauses = []
+            params = []
+            
+            for key, value in data.items():
+                if key not in ['id']:  # Don't allow updating the ID
+                    set_clauses.append(f"{key} = %s")
+                    params.append(value)
+            
+            # Add updated_at timestamp
+            set_clauses.append("updated_at = %s")
+            params.append(datetime.now())
+            
+            # Add department_id as the last parameter
+            params.append(department_id)
+            
+            query = f"""
+                UPDATE departments 
+                SET {', '.join(set_clauses)}
+                WHERE id = %s
+            """
+            
+            cursor.execute(query, params)
+            affected = cursor.rowcount > 0
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            
+            if affected:
+                logger.info(f"Updated department: {department_id}")
+                return True
+            else:
+                logger.warning(f"Department not found: {department_id}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error updating department: {str(e)}")
+            return False
+    
+    def recalculate_category_percentages(self) -> bool:
+        """
+        Recalculate category percentages based on counts.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            
+            # Get total count across all categories
+            cursor.execute("SELECT SUM(count) FROM categories")
+            total = cursor.fetchone()[0] or 0
+            
+            if total > 0:
+                # Update percentages for all categories
+                cursor.execute("""
+                    UPDATE categories
+                    SET percentage = (count * 100.0 / %s)::numeric(5,2),
+                        updated_at = %s
+                """, (total, datetime.now()))
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            
+            logger.info("Recalculated category percentages")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error recalculating category percentages: {str(e)}")
+            return False
     
     def _migrate_legacy_data(self):
         """Migrate data from JSON files to PostgreSQL database."""

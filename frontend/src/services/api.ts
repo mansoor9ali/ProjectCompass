@@ -16,6 +16,10 @@ const api = axios.create({
   }
 });
 
+
+console.log(appConfig);
+console.log(api);
+
 // System endpoints
 export const getSystemStatus = () => 
   api.get<SystemStatus>('/system/status');

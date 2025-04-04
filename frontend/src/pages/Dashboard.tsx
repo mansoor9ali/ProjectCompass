@@ -46,9 +46,30 @@ const Dashboard: React.FC = () => {
         getCategoryDistribution()
       ]);
       
-      setSystemStatus(statusResponse.data);
-      setDepartmentStats(departmentResponse.data.departments);
-      setCategoryData(categoryResponse.data.categories);
+      // Safely set data with proper error handling
+      setSystemStatus(statusResponse.data || {
+        status: 'unknown',
+        active_inquiries: 0,
+        total_inquiries: 0,
+        notifications_sent: 0
+      });
+      
+      // Check if departments property exists in the response
+      if (departmentResponse?.data?.departments) {
+        setDepartmentStats(departmentResponse.data.departments);
+      } else {
+        console.warn('No department data found in API response');
+        setDepartmentStats([]);
+      }
+      
+      // Check if categories property exists in the response
+      if (categoryResponse?.data?.categories) {
+        setCategoryData(categoryResponse.data.categories);
+      } else {
+        console.warn('No category data found in API response');
+        setCategoryData([]);
+      }
+      
       setLastUpdated(new Date());
       setIsLoading(false);
     } catch (err) {
@@ -63,20 +84,20 @@ const Dashboard: React.FC = () => {
     fetchDashboardData();
   }, []);
 
-  // Prepare department chart data
+  // Prepare department chart data only if departmentStats is available
   const departmentChartData = {
-    labels: departmentStats.map(dept => dept.name),
+    labels: departmentStats?.map(dept => dept.name) || [],
     datasets: [
       {
         label: 'Current Load',
-        data: departmentStats.map(dept => dept.load),
+        data: departmentStats?.map(dept => dept.load) || [],
         backgroundColor: 'rgba(54, 162, 235, 0.5)',
         borderColor: 'rgba(54, 162, 235, 1)',
         borderWidth: 1
       },
       {
         label: 'Avg Response Time (hours)',
-        data: departmentStats.map(dept => dept.avg_response_time),
+        data: departmentStats?.map(dept => dept.avg_response_time) || [],
         backgroundColor: 'rgba(255, 99, 132, 0.5)',
         borderColor: 'rgba(255, 99, 132, 1)',
         borderWidth: 1
@@ -84,20 +105,19 @@ const Dashboard: React.FC = () => {
     ]
   };
 
-  // Prepare category chart data
+  // Prepare category chart data only if categoryData is available
   const categoryChartData = {
-    labels: categoryData.map(cat => cat.name),
+    labels: categoryData?.map(cat => cat.name) || [],
     datasets: [
       {
-        data: categoryData.map(cat => cat.count),
+        label: 'Inquiries by Category',
+        data: categoryData?.map(cat => cat.count) || [],
         backgroundColor: [
           'rgba(255, 99, 132, 0.5)',
           'rgba(54, 162, 235, 0.5)',
           'rgba(255, 206, 86, 0.5)',
           'rgba(75, 192, 192, 0.5)',
           'rgba(153, 102, 255, 0.5)',
-          'rgba(255, 159, 64, 0.5)',
-          'rgba(201, 203, 207, 0.5)'
         ],
         borderColor: [
           'rgba(255, 99, 132, 1)',
@@ -105,155 +125,129 @@ const Dashboard: React.FC = () => {
           'rgba(255, 206, 86, 1)',
           'rgba(75, 192, 192, 1)',
           'rgba(153, 102, 255, 1)',
-          'rgba(255, 159, 64, 1)',
-          'rgba(201, 203, 207, 1)'
         ],
-        borderWidth: 1
-      }
-    ]
+        borderWidth: 1,
+      },
+    ],
   };
-
-  // Get status class based on system status
-  const getStatusClass = (status: string): string => {
-    switch (status) {
-      case 'operational':
-        return 'status-operational';
-      case 'warning':
-        return 'status-warning';
-      case 'error':
-        return 'status-error';
-      default:
-        return '';
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <Container className="text-center mt-5">
-        <Spinner animation="border" role="status">
-          <span className="visually-hidden">Loading dashboard data...</span>
-        </Spinner>
-      </Container>
-    );
-  }
-
-  if (error) {
-    return (
-      <Container>
-        <Alert variant="danger">{error}</Alert>
-        <Button variant="primary" onClick={fetchDashboardData}>
-          Retry
-        </Button>
-      </Container>
-    );
-  }
 
   return (
-    <Container fluid>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h1>ProjectCompass Dashboard</h1>
-        <div>
-          <small className="text-muted me-2">
-            Last updated: {lastUpdated.toLocaleTimeString()}
-          </small>
-          <Button 
-            variant="outline-primary" 
-            size="sm" 
-            onClick={fetchDashboardData}
-            disabled={isLoading}
-          >
-            {isLoading ? 'Refreshing...' : 'Refresh Data'}
-          </Button>
-        </div>
-      </div>
-      
-      {/* System Status Section */}
-      <Row className="mb-4">
-        <Col lg={3} md={6} sm={12} className="mb-3">
-          <Card className="dashboard-card h-100">
-            <Card.Body>
-              <Card.Title>System Status</Card.Title>
-              <div className={`status-card ${getStatusClass(systemStatus.status)}`}>
-                {systemStatus.status.toUpperCase()}
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-        
-        <Col lg={3} md={6} sm={12} className="mb-3">
-          <Card className="dashboard-card h-100">
-            <Card.Body>
-              <Card.Title>Active Inquiries</Card.Title>
-              <h2 className="text-center">{systemStatus.active_inquiries}</h2>
-            </Card.Body>
-          </Card>
-        </Col>
-        
-        <Col lg={3} md={6} sm={12} className="mb-3">
-          <Card className="dashboard-card h-100">
-            <Card.Body>
-              <Card.Title>Total Inquiries</Card.Title>
-              <h2 className="text-center">{systemStatus.total_inquiries}</h2>
-            </Card.Body>
-          </Card>
-        </Col>
-        
-        <Col lg={3} md={6} sm={12} className="mb-3">
-          <Card className="dashboard-card h-100">
-            <Card.Body>
-              <Card.Title>Notifications Sent</Card.Title>
-              <h2 className="text-center">{systemStatus.notifications_sent}</h2>
-            </Card.Body>
-          </Card>
+    <Container>
+      <Row className="mb-4 mt-4">
+        <Col>
+          <h1>Dashboard</h1>
+          <div className="d-flex justify-content-between align-items-center">
+            <p className="text-muted">
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </p>
+            {/* Manual refresh button */}
+            <Button 
+              variant="primary" 
+              onClick={fetchDashboardData} 
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" className="me-2" />
+                  Refreshing...
+                </>
+              ) : (
+                'Refresh Data'
+              )}
+            </Button>
+          </div>
         </Col>
       </Row>
-      
-      {/* Charts Section */}
-      <Row>
-        <Col lg={6} className="mb-4">
-          <Card className="dashboard-card">
-            <Card.Body>
-              <Card.Title>Department Workload & Response Time</Card.Title>
-              <div className="chart-container">
-                <Bar 
-                  data={departmentChartData} 
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                      y: {
-                        beginAtZero: true
-                      }
-                    }
-                  }}
-                />
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-        
-        <Col lg={6} className="mb-4">
-          <Card className="dashboard-card">
-            <Card.Body>
-              <Card.Title>Inquiry Categories Distribution</Card.Title>
-              <div className="chart-container">
-                <Doughnut 
-                  data={categoryChartData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: {
-                        position: 'right'
-                      }
-                    }
-                  }}
-                />
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+
+      {error && (
+        <Row className="mb-4">
+          <Col>
+            <Alert variant="danger">
+              {error}
+            </Alert>
+          </Col>
+        </Row>
+      )}
+
+      {isLoading ? (
+        <Row className="justify-content-center my-5">
+          <Col xs="auto">
+            <Spinner animation="border" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </Spinner>
+          </Col>
+        </Row>
+      ) : (
+        <>
+          <Row className="mb-4">
+            <Col md={3}>
+              <Card className="text-center h-100">
+                <Card.Body>
+                  <Card.Title>System Status</Card.Title>
+                  <h3 className={`mt-3 ${systemStatus.status === 'operational' ? 'text-success' : 'text-warning'}`}>
+                    {systemStatus.status === 'operational' ? 'Operational' : 'Attention Needed'}
+                  </h3>
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col md={3}>
+              <Card className="text-center h-100">
+                <Card.Body>
+                  <Card.Title>Active Inquiries</Card.Title>
+                  <h3 className="mt-3">{systemStatus.active_inquiries}</h3>
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col md={3}>
+              <Card className="text-center h-100">
+                <Card.Body>
+                  <Card.Title>Total Inquiries</Card.Title>
+                  <h3 className="mt-3">{systemStatus.total_inquiries}</h3>
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col md={3}>
+              <Card className="text-center h-100">
+                <Card.Body>
+                  <Card.Title>Notifications</Card.Title>
+                  <h3 className="mt-3">{systemStatus.notifications_sent}</h3>
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+
+          <Row className="mb-4">
+            <Col lg={8}>
+              <Card className="h-100">
+                <Card.Body>
+                  <Card.Title>Department Performance</Card.Title>
+                  {departmentStats.length > 0 ? (
+                    <Bar data={departmentChartData} />
+                  ) : (
+                    <div className="text-center text-muted py-5">
+                      <p>No department data available</p>
+                    </div>
+                  )}
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col lg={4}>
+              <Card className="h-100">
+                <Card.Body>
+                  <Card.Title>Category Distribution</Card.Title>
+                  {categoryData.length > 0 ? (
+                    <Doughnut data={categoryChartData} />
+                  ) : (
+                    <div className="text-center text-muted py-5">
+                      <p>No category data available</p>
+                    </div>
+                  )}
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+        </>
+      )}
     </Container>
   );
 };
